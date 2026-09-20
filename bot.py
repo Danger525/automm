@@ -1114,9 +1114,12 @@ async def admin_panel(ctx, deal_id: str):
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
 async def setup_panel(ctx):
     """Post the AutoMM escrow ticket creation panel."""
+    if not is_staff(ctx.author):
+        await ctx.send("❌ You need Administrator permissions or the Middleman role to deploy this panel.")
+        return
+
     embed = discord.Embed(
         title=f"🛡️ {BRAND_NAME}",
         description=(
@@ -1132,6 +1135,17 @@ async def setup_panel(ctx):
     )
     embed.set_footer(text="AutoMM • Powered by Ethereum Sepolia Testnet")
     await ctx.send(embed=embed, view=CreateTicketView())
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        return
+    if isinstance(error, (commands.MissingPermissions, commands.CheckFailure)):
+        await ctx.send("❌ You do not have permission to use this command.")
+        return
+    logger.error(f"Command error in {ctx.command}: {error}")
+
 
 
 if __name__ == "__main__":
