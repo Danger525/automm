@@ -927,6 +927,192 @@ async def on_ready():
     logger.info(f"Connected to Discord as {bot.user} (ID: {bot.user.id})")
 
 
+# ------------------------------------------------------------
+# Admin Escrow Management View & Commands
+# ------------------------------------------------------------
+
+class AdminDealPanelView(View):
+    def __init__(self, deal_id: str):
+        super().__init__(timeout=None)
+        self.deal_id = deal_id
+
+    @discord.ui.button(label="⚡ Force Release Payout", style=discord.ButtonStyle.success)
+    async def force_release(self, interaction: discord.Interaction, button: Button):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("Only staff can use this action.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(f"⏳ Executing Admin Force Release for deal `{self.deal_id}` on Sepolia...", ephemeral=False)
+        try:
+            resp = await automm_client.release(self.deal_id, requester_id=BACKEND_SECRET)
+            tx = resp.get("tx_hash")
+            await interaction.channel.send(
+                f"✅ **Admin Force Release Successful!**\n"
+                f"• Deal ID: `{self.deal_id}`\n"
+                f"• Transaction Hash: `{tx}`\n"
+                f"• Etherscan: https://sepolia.etherscan.io/tx/{tx}"
+            )
+        except AutoMMApiError as e:
+            await interaction.channel.send(f"❌ Force release failed: {e.message}")
+
+    @discord.ui.button(label="↩️ Force Refund Buyer", style=discord.ButtonStyle.danger)
+    async def force_refund(self, interaction: discord.Interaction, button: Button):
+        if not is_staff(interaction.user):
+            await interaction.response.send_message("Only staff can use this action.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(f"⏳ Executing Admin Force Refund for deal `{self.deal_id}` on Sepolia...", ephemeral=False)
+        try:
+            resp = await automm_client.refund(self.deal_id, requester_id=BACKEND_SECRET, reason=f"Admin refund by {interaction.user}")
+            tx = resp.get("tx_hash")
+            await interaction.channel.send(
+                f"↩️ **Admin Force Refund Successful!**\n"
+                f"• Deal ID: `{self.deal_id}`\n"
+                f"• Transaction Hash: `{tx}`\n"
+                f"• Etherscan: https://sepolia.etherscan.io/tx/{tx}"
+            )
+        except AutoMMApiError as e:
+            await interaction.channel.send(f"❌ Force refund failed: {e.message}")
+
+
+@bot.command()
+async def admin_help(ctx):
+    """List administrative escrow management commands."""
+    if not is_staff(ctx.author):
+        await ctx.send("Only authorized Middleman staff can run admin commands.")
+        return
+
+    embed = discord.Embed(
+        title="🛠️ AutoMM Admin Escrow Controls",
+        description=(
+            "**Commands for Managing On-Chain Escrow Deals:**\n\n"
+            "• `$deal_info <deal_id>` — Query backend deal details, on-chain balance, and addresses.\n"
+            "• `$admin_release <deal_id> [optional_destination]` — Force release funds to seller (or custom address).\n"
+            "• `$admin_refund <deal_id> [optional_destination]` — Force refund funds to buyer (or custom address).\n"
+            "• `$admin_panel <deal_id>` — Spawn an interactive Admin Control Panel for a deal with one-click buttons.\n"
+            "• `$setup_panel` — Deploy the public Ticket creation panel."
+        ),
+        color=0xFEE75C
+    )
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def deal_info(ctx, deal_id: str):
+    """Inspect any deal and its on-chain status."""
+    if not is_staff(ctx.author):
+        await ctx.send("Only staff can inspect deal data.")
+        return
+
+    deal_id = deal_id.strip()
+    try:
+        deal = await automm_client.get_deal(deal_id)
+        status_resp = await automm_client.get_status(deal_id)
+
+        embed = discord.Embed(
+            title=f"🔎 Escrow Deal Details: `{deal_id[:12]}...`",
+            color=0x5865F2
+        )
+        embed.add_field(name="Full Deal ID", value=f"`{deal_id}`", inline=False)
+        embed.add_field(name="Buyer ID", value=f"<@{deal['buyer_id']}> (`{deal['buyer_id']}`)", inline=True)
+        embed.add_field(name="Seller ID", value=f"<@{deal['seller_id']}> (`{deal['seller_id']}`)" if deal.get('seller_id') else "None", inline=True)
+        embed.add_field(name="Status", value=f"`{deal['status']}`", inline=True)
+        embed.add_field(name="Amount", value=f"`{deal['amount']} {deal['token']}`", inline=True)
+        embed.add_field(name="Network", value=f"`{deal['network']}`", inline=True)
+        embed.add_field(name="On-Chain Escrow Balance", value=f"`{status_resp.get('escrow_balance', '0')} {deal['token']}`", inline=True)
+        embed.add_field(name="Deposit Address", value=f"`{deal.get('escrow_address') or 'Not generated'}`", inline=False)
+        embed.add_field(name="Seller Payout Address", value=f"`{deal.get('seller_payout_address') or 'Not set'}`", inline=True)
+        embed.add_field(name="Buyer Refund Address", value=f"`{deal.get('buyer_refund_address') or 'Not set'}`", inline=True)
+        embed.add_field(name="Confirmations", value=f"`{status_resp.get('confirmations', 0)} / {status_resp.get('required_confirmations', 2)}`", inline=True)
+
+        await ctx.send(embed=embed)
+    except AutoMMApiError as e:
+        await ctx.send(f"❌ Error fetching deal: {e.message}")
+
+
+@bot.command()
+async def admin_release(ctx, deal_id: str, destination_address: Optional[str] = None):
+    """Admin command to force release escrow funds to seller (or custom address)."""
+    if not is_staff(ctx.author):
+        await ctx.send("Only authorized Middleman staff can execute admin releases.")
+        return
+
+    deal_id = deal_id.strip()
+    dest = destination_address.strip() if destination_address else None
+    await ctx.send(f"⏳ **Admin Release Initiated** for deal `{deal_id}`... Decrypting escrow key and broadcasting transaction to Sepolia testnet.")
+
+    try:
+        resp = await automm_client.release(deal_id, requester_id=BACKEND_SECRET, destination_address=dest)
+        tx = resp.get("tx_hash")
+        await ctx.send(
+            f"✅ **Release Broadcast Succeeded!**\n"
+            f"• Deal ID: `{deal_id}`\n"
+            f"• Transaction Hash: `{tx}`\n"
+            f"• Etherscan Explorer: https://sepolia.etherscan.io/tx/{tx}"
+        )
+    except AutoMMApiError as e:
+        await ctx.send(f"❌ Admin release failed: {e.message}")
+
+
+@bot.command()
+async def admin_refund(ctx, deal_id: str, destination_address: Optional[str] = None):
+    """Admin command to force refund escrow funds to buyer (or custom address)."""
+    if not is_staff(ctx.author):
+        await ctx.send("Only authorized Middleman staff can execute admin refunds.")
+        return
+
+    deal_id = deal_id.strip()
+    dest = destination_address.strip() if destination_address else None
+    await ctx.send(f"⏳ **Admin Refund Initiated** for deal `{deal_id}`... Decrypting escrow key and broadcasting transaction to Sepolia testnet.")
+
+    try:
+        resp = await automm_client.refund(
+            deal_id,
+            requester_id=BACKEND_SECRET,
+            reason=f"Admin refund executed by {ctx.author}",
+            destination_address=dest
+        )
+        tx = resp.get("tx_hash")
+        await ctx.send(
+            f"↩️ **Refund Broadcast Succeeded!**\n"
+            f"• Deal ID: `{deal_id}`\n"
+            f"• Transaction Hash: `{tx}`\n"
+            f"• Etherscan Explorer: https://sepolia.etherscan.io/tx/{tx}"
+        )
+    except AutoMMApiError as e:
+        await ctx.send(f"❌ Admin refund failed: {e.message}")
+
+
+@bot.command()
+async def admin_panel(ctx, deal_id: str):
+    """Display an interactive Admin Escrow Control Panel with one-click buttons."""
+    if not is_staff(ctx.author):
+        await ctx.send("Only authorized staff can open the admin panel.")
+        return
+
+    deal_id = deal_id.strip()
+    try:
+        deal = await automm_client.get_deal(deal_id)
+        status_resp = await automm_client.get_status(deal_id)
+
+        embed = discord.Embed(
+            title="🛡️ Admin Escrow Control Panel",
+            description=f"Manage on-chain funds for Deal `{deal_id}`",
+            color=0xFEE75C
+        )
+        embed.add_field(name="Status", value=f"`{deal['status']}`", inline=True)
+        embed.add_field(name="Amount", value=f"`{deal['amount']} {deal['token']}`", inline=True)
+        embed.add_field(name="Escrow Balance", value=f"`{status_resp.get('escrow_balance', '0')} {deal['token']}`", inline=True)
+        embed.add_field(name="Escrow Wallet", value=f"`{deal.get('escrow_address') or 'None'}`", inline=False)
+        embed.add_field(name="Seller Payout Target", value=f"`{deal.get('seller_payout_address') or 'Not set'}`", inline=True)
+        embed.add_field(name="Buyer Refund Target", value=f"`{deal.get('buyer_refund_address') or 'Not set'}`", inline=True)
+        embed.set_footer(text="Click a button below to force release or refund on-chain.")
+
+        await ctx.send(embed=embed, view=AdminDealPanelView(deal_id=deal_id))
+    except AutoMMApiError as e:
+        await ctx.send(f"❌ Error loading deal: {e.message}")
+
+
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def setup_panel(ctx):
@@ -952,3 +1138,4 @@ if __name__ == "__main__":
     if not BOT_TOKEN:
         raise RuntimeError("DISCORD_TOKEN environment variable is not set.")
     bot.run(BOT_TOKEN)
+

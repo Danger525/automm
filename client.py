@@ -106,15 +106,25 @@ class AutoMMClient:
         payload = {"seller_id": str(seller_id)}
         return await self._request("POST", f"/deals/{deal_id}/deliver", json=payload)
 
-    async def release(self, deal_id: str, requester_id: str) -> Dict[str, Any]:
-        payload = {"requester_id": str(requester_id)}
+    async def release(self, deal_id: str, requester_id: str, destination_address: Optional[str] = None) -> Dict[str, Any]:
+        payload = {
+            "requester_id": str(requester_id),
+            "destination_address": destination_address
+        }
         return await self._request("POST", f"/deals/{deal_id}/release", json=payload)
 
-    async def refund(self, deal_id: str, requester_id: Optional[str] = None, reason: Optional[str] = None) -> Dict[str, Any]:
+    async def refund(
+        self,
+        deal_id: str,
+        requester_id: Optional[str] = None,
+        reason: Optional[str] = None,
+        destination_address: Optional[str] = None
+    ) -> Dict[str, Any]:
         req_id = requester_id or BACKEND_SECRET
         payload = {
             "requester_id": str(req_id),
-            "reason": reason or "Dispute resolved by staff"
+            "reason": reason or "Dispute resolved by staff",
+            "destination_address": destination_address
         }
         return await self._request("POST", f"/deals/{deal_id}/refund", json=payload)
 

@@ -50,11 +50,12 @@ class RefundService:
                 detail="Refunds can only be authorized by an escrow administrator or dispute mediator."
             )
 
-        # 3. Check deal state: Must be DISPUTED or FUNDED
-        if deal.status not in (DealStatus.DISPUTED, DealStatus.FUNDED):
+        # 3. Check deal state: Must be active escrow state
+        allowed_refund_statuses = (DealStatus.DISPUTED, DealStatus.FUNDED, DealStatus.DELIVERING, DealStatus.DELIVERED)
+        if deal.status not in allowed_refund_statuses:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot refund deal: Status is '{deal.status.value}'. Must be DISPUTED or FUNDED."
+                detail=f"Cannot refund deal: Status is '{deal.status.value}'. Must be FUNDED or DISPUTED."
             )
 
         if not deal.escrow_wallet:

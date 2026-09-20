@@ -41,6 +41,7 @@ VALID_TRANSITIONS: Dict[DealStatus, Set[DealStatus]] = {
         DealStatus.DELIVERING,
         DealStatus.DELIVERED,
         DealStatus.RELEASE_PENDING,
+        DealStatus.REFUND_PENDING,
         DealStatus.DISPUTED,
     },
     DealStatus.DELIVERING: {
@@ -49,6 +50,7 @@ VALID_TRANSITIONS: Dict[DealStatus, Set[DealStatus]] = {
     },
     DealStatus.DELIVERED: {
         DealStatus.RELEASE_PENDING,
+        DealStatus.REFUND_PENDING,
         DealStatus.DISPUTED,
     },
     DealStatus.RELEASE_PENDING: {
