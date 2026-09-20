@@ -1,4 +1,8 @@
 .env
 __pycache__/
 *.pyc
+*.db
+*.sqlite
+.pytest_cache/
 tickets.json
+.venv/
