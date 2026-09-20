@@ -17,7 +17,10 @@ from backend.domain.schemas import (
     ReleaseRequest,
     RefundRequest,
     DisputeRequest,
-    DealStatusResponse
+    DealStatusResponse,
+    SetSellerRequest,
+    SetTermsRequest,
+    DeliverRequest
 )
 from backend.services.deal_service import DealService
 from backend.services.escrow_service import EscrowService
@@ -76,6 +79,77 @@ async def get_deal(
     """Retrieve deal details by ID."""
     deal = await DealService.get_deal(db, deal_id)
     return format_deal_response(deal)
+
+
+@router.post("/{deal_id}/seller", response_model=DealResponse)
+async def set_deal_seller(
+    deal_id: str,
+    seller_in: SetSellerRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Attach or update the counterparty seller ID for the deal."""
+    deal = await DealService.get_deal(db, deal_id)
+    if deal.terms_locked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify seller after terms are locked."
+        )
+    deal.seller_id = seller_in.seller_id
+    await db.commit()
+    await db.refresh(deal)
+    return format_deal_response(deal)
+
+
+@router.patch("/{deal_id}/terms", response_model=DealResponse)
+async def update_deal_terms(
+    deal_id: str,
+    terms_in: SetTermsRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Set or update deal terms (amount, token, network) before agreement."""
+    deal = await DealService.get_deal(db, deal_id)
+    if deal.terms_locked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot modify terms after both parties have agreed and locked terms."
+        )
+    deal.amount = terms_in.amount.strip()
+    deal.token = terms_in.token.strip().upper()
+    deal.network = terms_in.network.strip().upper()
+    # Reset agreements if terms change
+    deal.buyer_agreed = False
+    deal.seller_agreed = False
+    await db.commit()
+    await db.refresh(deal)
+    return format_deal_response(deal)
+
+
+@router.post("/{deal_id}/deliver", response_model=DealResponse)
+async def mark_delivered(
+    deal_id: str,
+    deliver_in: DeliverRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Seller marks delivery of goods/services complete."""
+    deal = await DealService.get_deal(db, deal_id)
+    if deliver_in.seller_id != deal.seller_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the registered seller can mark delivery complete."
+        )
+    if deal.status != DealStatus.FUNDED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot mark delivered: Deal status is '{deal.status.value}'. Must be FUNDED."
+        )
+    updated_deal = await DealService.update_status(
+        session=db,
+        deal=deal,
+        target_status=DealStatus.DELIVERED,
+        actor=deliver_in.seller_id,
+        meta={"action": "SELLER_MARKED_DELIVERED"}
+    )
+    return format_deal_response(updated_deal)
 
 
 @router.post("/{deal_id}/agree", response_model=DealResponse)

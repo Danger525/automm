@@ -7,11 +7,25 @@ from backend.domain.enums import DealStatus, TransactionType, TransactionStatus
 class DealCreate(BaseModel):
     buyer_id: str = Field(..., description="Unique ID of the buyer (e.g., Discord ID)")
     seller_id: Optional[str] = Field(None, description="Unique ID of the seller")
-    amount: str = Field(..., description="Exact amount required for the escrow deal")
+    amount: Optional[str] = Field(default="0", description="Amount required for the escrow deal")
     token: str = Field(default="ETH", description="Asset symbol (e.g. ETH)")
     network: str = Field(default="SEPOLIA", description="Blockchain network (e.g. SEPOLIA)")
     seller_payout_address: Optional[str] = Field(None, description="Seller wallet address for payout")
     buyer_refund_address: Optional[str] = Field(None, description="Buyer wallet address for refund")
+
+
+class SetSellerRequest(BaseModel):
+    seller_id: str = Field(..., description="Discord ID or unique ID of the seller")
+
+
+class SetTermsRequest(BaseModel):
+    amount: str = Field(..., description="Escrow trade amount")
+    token: str = Field(default="ETH", description="Token/asset symbol")
+    network: str = Field(default="SEPOLIA", description="Blockchain network")
+
+
+class DeliverRequest(BaseModel):
+    seller_id: str = Field(..., description="Seller user ID confirming delivery")
 
 
 class DealAgree(BaseModel):

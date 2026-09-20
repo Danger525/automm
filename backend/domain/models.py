@@ -47,9 +47,9 @@ class Deal(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
-    escrow_wallet = relationship("EscrowWallet", uselist=False, back_populates="deal", cascade="all, delete-orphan")
-    transactions = relationship("BlockchainTransaction", back_populates="deal", cascade="all, delete-orphan")
-    audit_logs = relationship("AuditLog", back_populates="deal", cascade="all, delete-orphan")
+    escrow_wallet = relationship("EscrowWallet", uselist=False, back_populates="deal", cascade="all, delete-orphan", lazy="selectin")
+    transactions = relationship("BlockchainTransaction", back_populates="deal", cascade="all, delete-orphan", lazy="selectin")
+    audit_logs = relationship("AuditLog", back_populates="deal", cascade="all, delete-orphan", lazy="selectin")
 
 
 class EscrowWallet(Base):
