@@ -219,7 +219,16 @@ def build_deal_embed(channel: discord.TextChannel) -> discord.Embed:
             inline=False
         )
 
-    embed.set_footer(text="AutoMM Escrow • Testnet Only • Keys Encrypted at Rest")
+    if status_str in ("FUNDED", "DELIVERING", "DELIVERED", "PAYMENT_DETECTED"):
+        footer_text = "🔒 Active Escrow — Ticket closure is locked until funds are released or refunded."
+    elif status_str == "DISPUTED":
+        footer_text = "⚖️ Active Dispute — Awaiting Middleman resolution."
+    elif status_str in ("COMPLETED", "REFUNDED"):
+        footer_text = "✅ Deal finalized — Ticket may now be closed and archived."
+    else:
+        footer_text = "AutoMM Escrow • Testnet Only • Keys Encrypted at Rest"
+
+    embed.set_footer(text=footer_text)
     return embed
 
 
@@ -668,6 +677,56 @@ class DealRoomView(View):
         if interaction.user.id != data.get("buyer_id") and not is_staff(interaction.user):
             await interaction.response.send_message("Only the buyer or staff can close this ticket.", ephemeral=True)
             return
+
+        current_status = data.get("status", "")
+
+        # CRITICAL ESCROW SECURITY GUARD:
+        # Prevent closing ticket if funds are currently active, being delivered, or under dispute
+        if current_status in ("FUNDED", "DELIVERING", "DELIVERED"):
+            await interaction.response.send_message(
+                "⛔ **Cannot close ticket: Escrow is active!**\n\n"
+                "Crypto funds are currently locked in escrow. Closing the ticket would abandon the deal:\n"
+                "• If you received the item/service, click **Release Funds** to pay the seller.\n"
+                "• If there is a problem, click **Dispute** so an authorized Middleman can step in.",
+                ephemeral=True
+            )
+            return
+
+        if current_status == "RELEASE_PENDING":
+            await interaction.response.send_message(
+                "⛔ **Cannot close ticket:** Payout transaction is currently broadcasting to the blockchain. Please wait for confirmation.",
+                ephemeral=True
+            )
+            return
+
+        if current_status == "PAYMENT_DETECTED":
+            await interaction.response.send_message(
+                "⛔ **Cannot close ticket:** An incoming crypto deposit was detected and is currently confirming on-chain.",
+                ephemeral=True
+            )
+            return
+
+        if current_status == "DISPUTED" and not is_staff(interaction.user):
+            await interaction.response.send_message(
+                "⛔ **Cannot close ticket:** This ticket has an active dispute. Only an authorized Middleman can resolve and close this room.",
+                ephemeral=True
+            )
+            return
+
+        # If waiting for payment, verify on-chain balance is 0 before allowing cancellation
+        if current_status == "WAITING_FOR_PAYMENT" and data.get("deposit_address"):
+            deal_id = data.get("deal_id")
+            try:
+                st = await automm_client.get_status(deal_id)
+                bal = float(st.get("escrow_balance", "0"))
+                if bal > 0:
+                    await interaction.response.send_message(
+                        f"⛔ **Cannot close ticket:** Detected `{bal}` on the escrow deposit address! Funds are locked. Click **Dispute** or contact staff.",
+                        ephemeral=True
+                    )
+                    return
+            except Exception:
+                pass
 
         await interaction.response.defer()
 
